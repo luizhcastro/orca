@@ -44,6 +44,12 @@ vi.mock('../git/git-username', async () => {
   return { ...actual, resolveLocalGitUsername: vi.fn(async () => '') }
 })
 
+class TestOrcaRuntimeService extends OrcaRuntimeService {
+  getLayoutQueues() {
+    return this.layoutQueues
+  }
+}
+
 const store = {
   getRepo: () => ({
     id: 'repo-1',
@@ -74,7 +80,7 @@ const store = {
 }
 
 function createRuntime(mobileAutoRestoreFitMs: number | null = 5_000) {
-  const runtime = new OrcaRuntimeService({
+  const runtime = new TestOrcaRuntimeService({
     ...store,
     getSettings: () => ({ ...store.getSettings(), mobileAutoRestoreFitMs })
   })
@@ -356,10 +362,7 @@ describe('remote desktop viewer width driver', () => {
     const { runtime } = createRuntime()
     await runtime.updateRemoteDesktopViewer('pty-1', 'sub-A', 'viewer-A', 100, 30)
     await runtime.updateRemoteDesktopViewer('pty-1', 'sub-B', 'viewer-B', 80, 24, false)
-    const layoutQueues = Reflect.get(runtime, 'layoutQueues') as Map<
-      string,
-      { running: Promise<unknown>; pending: { target: { ownerSubscriptionKey?: string } }[] }
-    >
+    const layoutQueues = runtime.getLayoutQueues()
     layoutQueues.set('pty-1', { running: new Promise(() => {}), pending: [] })
 
     void runtime.updateRemoteDesktopViewer('pty-1', 'sub-A', 'viewer-A', 90, 28)
@@ -374,10 +377,7 @@ describe('remote desktop viewer width driver', () => {
   it('makes a host claim join a pending disconnect reclaim', async () => {
     const { runtime } = createRuntime()
     await runtime.updateRemoteDesktopViewer('pty-1', 'sub-A', 'viewer-A', 80, 24)
-    const layoutQueues = Reflect.get(runtime, 'layoutQueues') as Map<
-      string,
-      { running: Promise<unknown>; pending: { waiters: unknown[] }[] }
-    >
+    const layoutQueues = runtime.getLayoutQueues()
     layoutQueues.set('pty-1', { running: new Promise(() => {}), pending: [] })
 
     void runtime.unregisterRemoteDesktopViewer('pty-1', 'sub-A')
