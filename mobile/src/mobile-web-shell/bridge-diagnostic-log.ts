@@ -55,6 +55,10 @@ export function createBridgeDiagnosticReporter(): (diagnostic: BridgeHostDiagnos
       })
       return
     }
+    if (diagnostic.kind === 'navigate-back-refused') {
+      console.warn('[web-shell-bridge] the page asked to go back with nothing on the stack')
+      return
+    }
     if (diagnostic.kind === 'post-failed') {
       console.warn('[web-shell-bridge] the page could not be posted to', diagnostic.error)
       return

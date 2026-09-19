@@ -25,6 +25,10 @@ export type BridgeHostDiagnostic =
   /** A `notify` the host will not act on: a grant-gated name it never issued, or any name from a
    *  page that has not asked for a session yet. Nothing is owed back, so it is logged and dropped. */
   | { kind: 'notify-refused'; name: string; why: BridgeNotifyRefusal }
+  /** A `navigate-back` the shell had nothing to pop for: this page is the first screen on the
+   *  stack, so the only thing the page's Back button can do is nothing. Logged because silence
+   *  here is indistinguishable from a working one. */
+  | { kind: 'navigate-back-refused' }
   /** The shell asked this host to open a screen the protocol does not allow. The host serves no
    *  session at all in that state: an `init` the page refuses is worse than no `init`. */
   | { kind: 'route-refused'; issue: string }
@@ -62,6 +66,15 @@ export type BridgeHostOptions = {
    * nothing is a dead tap, which is exactly what the grant is supposed to rule out.
    */
   onNavigate: (href: string) => void
+  /**
+   * Pops the native stack this page was pushed onto. Required for the reason `onNavigate` is: the
+   * `navigate` grant carries this verb too, and a page told it may hand its Back button over and
+   * then handed it into nothing is the dead tap the grant exists to rule out.
+   *
+   * False means the stack had nothing left to pop, which is the shell's answer and not the page's
+   * business — nothing crosses back either way.
+   */
+  onNavigateBack: () => boolean
   /**
    * The page could not render the generation it was handed. Required, because the page has no
    * recovery of its own: the generation is on disk and was hash-checked before the view loaded it,

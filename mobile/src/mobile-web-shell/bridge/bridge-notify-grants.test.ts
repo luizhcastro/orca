@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BRIDGE_FAULT_GRANT } from './bridge-envelope'
+import { BRIDGE_FAULT_GRANT, BRIDGE_NAVIGATE_BACK_NOTIFY } from './bridge-envelope'
 import { BRIDGE_GRANT_GATED_NOTIFY_NAMES, bridgeNotifyRefusal } from './bridge-notify-grants'
 
 const GRANTED = [BRIDGE_FAULT_GRANT]
@@ -33,5 +33,48 @@ describe('what the host will act on', () => {
       expect(bridgeNotifyRefusal({ name, initSent: true, granted: [] }), name).toBeNull()
       expect(BRIDGE_GRANT_GATED_NOTIFY_NAMES, name).not.toContain(name)
     }
+  })
+})
+
+/**
+ * The first notify whose name is not its grant.
+ *
+ * `navigate-back` is the second verb of `navigate`, so nothing new enters
+ * `MOBILE_WEB_SHELL_GRANTS` and an app that can open a screen can close one. A gate keyed on the
+ * notify name instead would refuse it against every shell that exists.
+ */
+describe('a notify that rides a grant of another name', () => {
+  it('is served by a host that issued navigate, and refused by one that did not', () => {
+    expect(
+      bridgeNotifyRefusal({
+        name: BRIDGE_NAVIGATE_BACK_NOTIFY,
+        initSent: true,
+        granted: ['navigate']
+      })
+    ).toBeNull()
+    expect(
+      bridgeNotifyRefusal({ name: BRIDGE_NAVIGATE_BACK_NOTIFY, initSent: true, granted: [] })
+    ).toBe('ungranted')
+  })
+
+  it('is not served by a host that issued the notify name itself', () => {
+    // A grant list carrying `navigate-back` is a shell that named something no route may declare.
+    expect(
+      bridgeNotifyRefusal({
+        name: BRIDGE_NAVIGATE_BACK_NOTIFY,
+        initSent: true,
+        granted: [BRIDGE_NAVIGATE_BACK_NOTIFY]
+      })
+    ).toBe('ungranted')
+  })
+
+  it('is refused before the grant is read at all from a page with no session', () => {
+    expect(
+      bridgeNotifyRefusal({
+        name: BRIDGE_NAVIGATE_BACK_NOTIFY,
+        initSent: false,
+        granted: ['navigate']
+      })
+    ).toBe('before-ready')
   })
 })

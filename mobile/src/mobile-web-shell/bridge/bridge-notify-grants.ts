@@ -1,13 +1,24 @@
-import { BRIDGE_FAULT_GRANT } from './bridge-envelope'
+import { BRIDGE_FAULT_GRANT, BRIDGE_NAVIGATE_BACK_NOTIFY } from './bridge-envelope'
 
 /**
- * Which `notify` names a grant gates, and whether the host will act on one.
+ * Which grant each grant-gated `notify` name rides, and whether the host will act on one.
  *
  * `foreground` and `terminalViewport` are the protocol's own and ride no grant, so they are not
- * listed. A name that is listed is served only when `init.grants.native` carried it — inert while
- * every page is offered `fault`, and load-bearing the moment a grant is per-route.
+ * listed. A name that is listed is served only when `init.grants.native` carried the grant beside
+ * it — inert while every page is offered `fault`, and load-bearing the moment a grant is per-route.
+ *
+ * Name and grant are separate columns because they are not always the same word: `navigate-back` is
+ * the second verb of `navigate`, so an app that implements navigation implements both and nothing
+ * new enters `MOBILE_WEB_SHELL_GRANTS`. Keyed on the notify name alone, it would be refused by
+ * every shell that exists.
  */
-export const BRIDGE_GRANT_GATED_NOTIFY_NAMES: readonly string[] = [BRIDGE_FAULT_GRANT]
+const BRIDGE_NOTIFY_GRANTS: Readonly<Record<string, string | undefined>> = {
+  [BRIDGE_FAULT_GRANT]: BRIDGE_FAULT_GRANT,
+  [BRIDGE_NAVIGATE_BACK_NOTIFY]: 'navigate'
+}
+
+/** The `notify` names a grant gates, whichever grant each of them rides. */
+export const BRIDGE_GRANT_GATED_NOTIFY_NAMES: readonly string[] = Object.keys(BRIDGE_NOTIFY_GRANTS)
 
 export type BridgeNotifyRefusal = 'before-ready' | 'ungranted'
 
@@ -27,6 +38,6 @@ export function bridgeNotifyRefusal(args: {
   if (!args.initSent) {
     return 'before-ready'
   }
-  const gated = BRIDGE_GRANT_GATED_NOTIFY_NAMES.includes(args.name)
-  return gated && !args.granted.includes(args.name) ? 'ungranted' : null
+  const grant = BRIDGE_NOTIFY_GRANTS[args.name]
+  return grant !== undefined && !args.granted.includes(grant) ? 'ungranted' : null
 }

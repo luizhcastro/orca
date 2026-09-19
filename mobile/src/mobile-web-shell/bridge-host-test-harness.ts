@@ -23,6 +23,8 @@ export type Harness = {
   posted: string[]
   diagnostics: BridgeHostDiagnostic[]
   navigations: string[]
+  /** One entry per `navigate-back` the host acted on, `false` for one it found nothing to pop for. */
+  backPops: boolean[]
   storageWrites: { key: string; value: string | null }[]
   pageReadyCount: () => number
   routeRefusals: string[]
@@ -41,6 +43,8 @@ export function harness(
     post?: (json: string) => Promise<void>
     route?: BridgeInitRoute
     onNavigate?: (href: string) => void
+    /** False stands for a native stack with nothing left to pop. */
+    onNavigateBack?: () => boolean
     storage?: Readonly<Record<string, string>>
     /** For the suites that need the map to change between two `init` answers. */
     readStorage?: () => Readonly<Record<string, string>>
@@ -51,6 +55,7 @@ export function harness(
   const posted: string[] = []
   const diagnostics: BridgeHostDiagnostic[] = []
   const navigations: string[] = []
+  const backPops: boolean[] = []
   const storageWrites: { key: string; value: string | null }[] = []
   let pageReadies = 0
   const routeRefusals: string[] = []
@@ -73,6 +78,11 @@ export function harness(
     },
     onRouteRefused: (issue) => routeRefusals.push(issue),
     onNavigate: options.onNavigate ?? ((href) => navigations.push(href)),
+    onNavigateBack: () => {
+      const popped = options.onNavigateBack?.() ?? true
+      backPops.push(popped)
+      return popped
+    },
     onPageFault: (error) => {
       pageFaults.push(error)
       options.onPageFault?.(error)
@@ -95,6 +105,7 @@ export function harness(
     posted,
     diagnostics,
     navigations,
+    backPops,
     storageWrites,
     pageReadyCount: () => pageReadies,
     routeRefusals,

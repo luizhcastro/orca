@@ -61,6 +61,8 @@ export function useMobileWebShellBridge(args: {
   pageRoutes: readonly string[]
   /** Opens a screen the page does not render, over the still-mounted view. */
   onNavigate: (href: string) => void
+  /** Pops the stack this page was pushed onto. False when there was nothing left to pop. */
+  onNavigateBack: () => boolean
   /**
    * This host and its stored keys, or null while they are being read. No host is built without
    * them: `init` is answered once per `ready` and carries both, so a host that started without
@@ -92,6 +94,7 @@ export function useMobileWebShellBridge(args: {
   // Read through a ref for the same reason: the host is built once per session, and a caller's
   // fresh closure every render must not tear one down and settle its pendings.
   const navigateRef = useRef(args.onNavigate)
+  const navigateBackRef = useRef(args.onNavigateBack)
   const storageWriteRef = useRef(args.onStorageWrite)
   const readStorageRef = useRef(args.readStorage)
   const pageFaultRef = useRef(args.onPageFault)
@@ -103,6 +106,7 @@ export function useMobileWebShellBridge(args: {
     routeRef.current = args.route
     pageRoutesRef.current = args.pageRoutes
     navigateRef.current = args.onNavigate
+    navigateBackRef.current = args.onNavigateBack
     storageWriteRef.current = args.onStorageWrite
     readStorageRef.current = args.readStorage
     pageFaultRef.current = args.onPageFault
@@ -110,6 +114,7 @@ export function useMobileWebShellBridge(args: {
     routeRefusedRef.current = args.onRouteRefused
   }, [
     args.onNavigate,
+    args.onNavigateBack,
     args.onPageFault,
     args.onPageReady,
     args.onRouteRefused,
@@ -144,6 +149,7 @@ export function useMobileWebShellBridge(args: {
       onNavigate: (href) => {
         navigateRef.current(href)
       },
+      onNavigateBack: () => navigateBackRef.current(),
       host: snapshot.host,
       readStorage: () => readStorageRef.current(),
       onStorageWrite: (key, value) => {

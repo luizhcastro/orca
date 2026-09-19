@@ -179,6 +179,16 @@ export function MobileWebShellScreen({
     // download and no second `init`.
     onNavigate: (href: string) => {
       router.push(href)
+    },
+    // The page's own Back goes nowhere: it holds the one history entry the entry wrote, so the only
+    // stack to pop is this one. Answering false rather than popping blindly keeps a page opened as
+    // the first screen from dismissing the app's root.
+    onNavigateBack: () => {
+      if (!router.canGoBack()) {
+        return false
+      }
+      router.back()
+      return true
     }
   })
 
