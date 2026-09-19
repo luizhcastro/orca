@@ -6,6 +6,7 @@
 // bundle. We keep dumps on disk and lift the *text* signature out of them, so
 // a CHECK failure becomes nameable without shipping raw memory anywhere.
 
+import { constants as fsConstants } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { open, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -293,11 +294,21 @@ export async function captureMinidumpSignature(
       }
       reservedDumpPaths.add(dump.filePath)
       try {
-        const handle = await open(dump.filePath, 'r')
+        // Reject symlink swaps where the platform exposes O_NOFOLLOW; the regular-file
+        // check below covers descriptors opened on every platform.
+        const noFollow = fsConstants.O_NOFOLLOW ?? 0
+        const handle = await open(
+          dump.filePath,
+          noFollow === 0 ? 'r' : fsConstants.O_RDONLY | noFollow
+        )
         let signature: MinidumpCrashSignature | null
         let sizeBytes: number
         try {
           const stats = await handle.stat()
+          if (!stats.isFile()) {
+            rejectedDumpPaths.add(dump.filePath)
+            return null
+          }
           sizeBytes = await observeMinidumpExtent(handle, stats.size, {
             deadlineMs,
             now: options.now
