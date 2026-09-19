@@ -4,16 +4,28 @@ import type { MinidumpSource } from './minidump-stream-reader'
 const PAGE_BYTES = 64 * 1024
 
 /** Size-zero readFile follows bytes until EOF, even when an open races the writer. */
+export type MinidumpExtentObservationOptions = {
+  readonly deadlineMs?: number
+  readonly now?: () => number
+}
+
 export async function observeMinidumpExtent(
   handle: FileHandle,
-  initialSize: number
+  initialSize: number,
+  options: MinidumpExtentObservationOptions = {}
 ): Promise<number> {
   if (initialSize !== 0) {
     return initialSize
   }
   const bytes = Buffer.allocUnsafe(PAGE_BYTES)
   let size = 0
+  const now = options.now ?? Date.now
   while (true) {
+    // A zero-length file still gets one read so a dump that is being promoted
+    // can be captured; stop before the next page once the polling deadline wins.
+    if (size > 0 && options.deadlineMs !== undefined && now() >= options.deadlineMs) {
+      return size
+    }
     const result = await handle.read(bytes, 0, bytes.length, size)
     if (result.bytesRead === 0) {
       return size

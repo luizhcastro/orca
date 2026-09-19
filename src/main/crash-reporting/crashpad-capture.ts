@@ -231,7 +231,7 @@ function freshDumpCandidates(candidates: DumpCandidate[], crashedAtMs: number): 
 async function pollDumpCandidates<T>(
   crashedAtMs: number,
   options: DumpPollingOptions,
-  select: (candidate: DumpCandidate) => Promise<T | null>
+  select: (candidate: DumpCandidate, deadlineMs: number) => Promise<T | null>
 ): Promise<T | null> {
   const directory = crashpadDumpDirectory
   if (!directory) {
@@ -246,7 +246,7 @@ async function pollDumpCandidates<T>(
   for (;;) {
     const fresh = freshDumpCandidates(await collectDumpCandidates(directory), crashedAtMs)
     for (const candidate of fresh) {
-      const selected = await select(candidate)
+      const selected = await select(candidate, deadline)
       if (selected !== null) {
         return selected
       }
@@ -283,7 +283,7 @@ export async function captureMinidumpSignature(
 ): Promise<CapturedMinidump | null> {
   const rejectedDumpPaths = new Set<string>()
   try {
-    return await pollDumpCandidates(crashedAtMs, options, async (dump) => {
+    return await pollDumpCandidates(crashedAtMs, options, async (dump, deadlineMs) => {
       if (
         rejectedDumpPaths.has(dump.filePath) ||
         claimedDumpPaths.has(dump.filePath) ||
@@ -298,7 +298,10 @@ export async function captureMinidumpSignature(
         let sizeBytes: number
         try {
           const stats = await handle.stat()
-          sizeBytes = await observeMinidumpExtent(handle, stats.size)
+          sizeBytes = await observeMinidumpExtent(handle, stats.size, {
+            deadlineMs,
+            now: options.now
+          })
           const source = createMinidumpFileSource(handle, sizeBytes)
           signature = await parseMinidumpCrashSignature(source, {
             expectedProcessType: options.expectedProcessType
