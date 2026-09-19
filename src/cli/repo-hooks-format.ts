@@ -6,7 +6,10 @@ import type {
   SetupAgentStartupPolicy,
   SetupRunPolicy
 } from '../shared/orca-yaml-hook-types'
-import { DEFAULT_SETUP_AGENT_STARTUP_POLICY } from '../shared/setup-agent-startup-policy'
+import {
+  DEFAULT_SETUP_AGENT_STARTUP_POLICY,
+  shouldWaitForSetupBeforeAgentStartup
+} from '../shared/setup-agent-startup-policy'
 
 export type RepoHooksRead = {
   repoId: string
@@ -50,8 +53,13 @@ export function buildRepoHooksView(read: RepoHooksRead): RepoHooksView {
     displayName: read.displayName,
     orcaYaml: describeOrcaYaml(read),
     setupRunPolicy: read.setupRunPolicy,
-    setupAgentStartupPolicy:
-      read.hookSettings?.setupAgentStartupPolicy ?? DEFAULT_SETUP_AGENT_STARTUP_POLICY,
+    // Why: the runner waits when either side asks for it, so neither one alone is the answer.
+    setupAgentStartupPolicy: shouldWaitForSetupBeforeAgentStartup(
+      read.hookSettings?.setupAgentStartupPolicy,
+      read.sharedCheck.hooks?.setupAgentStartupPolicy
+    )
+      ? 'wait-for-setup'
+      : DEFAULT_SETUP_AGENT_STARTUP_POLICY,
     commandSourcePolicy: rawCommandSource ?? null,
     resolvedCommandSourcePolicy: {
       setup: resolveHookCommandSourcePolicy(rawCommandSource, {
@@ -93,12 +101,27 @@ export function formatRepoHooks(view: RepoHooksView): string {
     `orca.yaml: ${view.orcaYaml}`,
     `setupRunPolicy: ${view.setupRunPolicy}`,
     `setupAgentStartupPolicy: ${view.setupAgentStartupPolicy}`,
-    `commandSource: ${view.commandSourcePolicy ?? `${view.resolvedCommandSourcePolicy.setup} (resolved)`}`,
+    ...formatCommandSource(view),
     '',
     ...formatScript('setup', view.scripts.setup),
     '',
     ...formatScript('archive', view.scripts.archive)
   ].join('\n')
+}
+
+/** Setup and archive resolve separately when no policy is set, and can land on different answers. */
+function formatCommandSource(view: RepoHooksView): string[] {
+  if (view.commandSourcePolicy) {
+    return [`commandSource: ${view.commandSourcePolicy}`]
+  }
+  const { setup, archive } = view.resolvedCommandSourcePolicy
+  if (setup === archive) {
+    return [`commandSource: ${setup} (resolved)`]
+  }
+  return [
+    `commandSource (setup): ${setup} (resolved)`,
+    `commandSource (archive): ${archive} (resolved)`
+  ]
 }
 
 function formatScript(name: string, script: RepoHookScriptView): string[] {

@@ -142,6 +142,61 @@ describe('orca repo hooks', () => {
     expect(log.mock.calls.at(-1)?.[0]).toContain('orca.yaml: unverifiable')
   })
 
+  it('shows the committed startup policy when the local settings do not set one', async () => {
+    queueFixtures(callMock, okFixture('req_repo_show', { repo: repoFixture() }))
+    queueHooksRead(
+      {},
+      { hooks: { scripts: { setup: 'pnpm install' }, setupAgentStartupPolicy: 'wait-for-setup' } }
+    )
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['repo', 'hooks', 'show', '--repo', 'orca'], '/tmp/repo')
+
+    expect(log.mock.calls.at(-1)?.[0]).toContain('setupAgentStartupPolicy: wait-for-setup')
+  })
+
+  it('names both command sources when setup and archive resolve differently', async () => {
+    queueFixtures(
+      callMock,
+      okFixture('req_repo_show', {
+        repo: repoFixture({
+          hookSettings: { mode: 'auto', scripts: { setup: '', archive: 'echo bye' } }
+        })
+      })
+    )
+    queueHooksRead()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['repo', 'hooks', 'show', '--repo', 'orca'], '/tmp/repo')
+
+    const printed = log.mock.calls.at(-1)?.[0]
+    expect(printed).toContain('commandSource (setup): shared-only (resolved)')
+    expect(printed).toContain('commandSource (archive): local-only (resolved)')
+  })
+
+  it('refuses to read both scripts from stdin, which would clear the second one', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(
+      [
+        'repo',
+        'hooks',
+        'set',
+        '--repo',
+        'orca',
+        '--setup-script-file',
+        '-',
+        '--archive-script-file',
+        '-',
+        '--json'
+      ],
+      '/tmp'
+    )
+
+    expectRejection(log, 'Only one of --setup-script-file and --archive-script-file')
+    expect(callMock).not.toHaveBeenCalled()
+  })
+
   it('writes one script without dropping the other settings the repo already had', async () => {
     queueFixtures(
       callMock,

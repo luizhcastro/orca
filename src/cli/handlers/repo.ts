@@ -76,6 +76,13 @@ export const REPO_HANDLERS: Record<string, CommandHandler> = {
   },
   'repo hooks set': async ({ flags, client, cwd, json }) => {
     const selector = getRequiredStringFlag(flags, 'repo')
+    // Why: the first read drains stdin, so the second would silently store an empty script.
+    if (flags.get('setup-script-file') === '-' && flags.get('archive-script-file') === '-') {
+      throw new RuntimeClientError(
+        'invalid_argument',
+        'Only one of --setup-script-file and --archive-script-file can read from stdin.'
+      )
+    }
     const change: RepoHookSettingsChange = {
       setupScript: await readScriptFlag(flags, cwd, 'setup-script'),
       archiveScript: await readScriptFlag(flags, cwd, 'archive-script'),
