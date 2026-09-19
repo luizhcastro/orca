@@ -587,7 +587,7 @@ describe('OrcaRuntimeService', () => {
     (Object.keys(TUI_AGENT_CONFIG) as TuiAgent[]).filter(
       (agent) => agent !== 'claude' && agent !== 'codex'
     )
-  )('holds Enter for the full open-loop submit delay for %s', async (agent) => {
+  )('submits through the agent-specific PTY timing policy for %s', async (agent) => {
     vi.useFakeTimers()
     try {
       const writes: string[] = []
@@ -611,6 +611,12 @@ describe('OrcaRuntimeService', () => {
         Buffer.byteLength(buildAgentPromptPasteBytes('review this change'), 'utf8')
       )
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
+      if (agent === 'omp') {
+        await sendPromise
+        expect(writes).toEqual([`${buildAgentPromptPasteBytes('review this change')}\r`])
+        return
+      }
+
       await vi.advanceTimersByTimeAsync(submitDelayMs - 1)
       expect(writes).not.toContain('\r')
 
