@@ -72,6 +72,16 @@ export function useRouteHandoff(): RouteHandoff {
           router.replace(href)
         }
       },
+      // The one member whose handoff needs no target: inside the page there is nothing behind this
+      // document, because the entry wrote its single history entry with `replaceState`. A stack the
+      // page did grow it pops itself; otherwise the stack that has somewhere to go is the native
+      // one the shell pushed this page onto, and a shell that cannot pop it leaves Back exactly as
+      // dead as it already was.
+      back: () => {
+        if (router.canGoBack() || !client.notifyNavigateBack()) {
+          router.back()
+        }
+      },
       // The list's own way out of the host. Inside the page there is no stack to pop to: the phone's
       // home screen is a native route, so it is handed over like any other.
       dismissTo: (href) => {
