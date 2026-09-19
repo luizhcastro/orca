@@ -1,14 +1,11 @@
-# Crashpad file-read limit
+# Crashpad bounded reads
 
-The local crash-report reader checked a dump's directory-stat size against its existing
-64 MiB limit, then later read the path without a limit. A file that grew or was replaced
-between those operations could allocate more than 64 MiB in the main process. The same
-stat/filter/read sequence exists in `v1.4.198`.
-
-This patch reuses `readNodeFileWithinLimit` at the read itself. An oversized read skips only
-that candidate, releases its reservation, and allows selection of the next valid dump. A
-successful result reports the byte count actually parsed. The quota, claim policy, other
-I/O error handling and partial-header retry policy remain unchanged.
+After a crash, Orca extracts a short diagnostic signature from a potentially large dump.
+The old reader loaded the complete dump. The current parser reads bounded ranges through
+four retained 64 KiB pages and scans embedded diagnostic text in roughly 1 MiB windows.
+It can capture a report that grows beyond the existing 64 MiB directory-discovery limit
+without keeping that report in one large buffer. Reports already beyond that limit when
+discovered retain the existing exclusion policy.
 
 ## Reproduction
 
@@ -16,77 +13,61 @@ I/O error handling and partial-header retry policy remain unchanged.
 ORCA_BACKGROUND_LAUNCH=1 node docs/audits/crashpad-read-limit/reproduce.mjs
 ```
 
-The runner reverses only `fix.patch` in memory through a temporary Vite configuration; it
-never edits production source. Both source versions must match the expected SHA-256 hashes.
-It runs the actual capture function, parser and filesystem against synthetic temporary files
-using the committed `crashpad-capture-read-limit.test.ts`. No ignored notes, native crash,
-real crash dump, app window, network request or external host is needed. Largest file: **65 MiB**.
+Use the repository's installed dependencies and supported Node version. The runner checks
+committed SHA-256 values in `source-hashes.json` before executing any tests. This includes
+the capture/parser, test fixtures, runner and its local imports, plus package and lockfile
+versions. It refuses changed sources instead of silently recording new hashes. Updating
+the manifest requires reviewing the changed evidence and rerunning the proof.
 
-| Phase    | Pass | Fail | Skip | Exit |
-| -------- | ---: | ---: | ---: | ---: |
-| Baseline |    4 |    3 |    1 |    1 |
-| Fixed    |    8 |    0 |    0 |    0 |
+The runner executes the actual capture and file-source tests with synthetic files, then
+repeats them with only the zero-size extent deadline disabled through an in-memory Vite
+transform. The mutation changes no files. This is a regression control for the deadline,
+not a simulation of every behavior in the original implementation.
 
-Seven cases run against both versions. Baseline failures are growth/replacement beyond the
-limit and stale size metadata after allowed growth. The two oversized reads delivered
-68,157,440-byte buffers to the real parser despite the 67,108,864-byte limit. The fixed version
-skips them and selects the next 131-byte renderer dump.
+| Phase                  | Pass | Fail | Skip | Exit |
+| ---------------------- | ---: | ---: | ---: | ---: |
+| Deadline removed       |   21 |    2 |    0 |    1 |
+| Current implementation |   23 |    0 |    0 |    0 |
 
-The eighth case exercises **growth after the same open descriptor's stat**. It is fixed-only:
-the old `readFile` call does not expose that descriptor-stat boundary, so the baseline skips
-it rather than manufacturing a failure. This case grows a real file to 65 MiB, verifies no
-oversized buffer reaches the parser, checks both descriptors close, and confirms that a later
-valid same-path file remains available after the failed read releases its reservation.
+The two expected failures verify that a file reported as size zero stops being read at
+the deadline, after either one or two pages, even though more bytes remain available.
+The controls fail both on the observed extent and the number of actual file reads.
+The runner checks their exact names and exits unsuccessfully for unexpected results.
+`results.json` records the verified hashes, counts, failed cases, exit codes and timeouts.
 
-Other controls accept exactly 64 MiB, skip an already oversized file, and preserve existing
-partial-header behavior. A short invalid header is rejected only for the current capture
-window; a fresh capture can retry it. Promotion to a different completed path can recover
-within the original polling window. The proof does not add a file-completion policy.
+Other controls cover 80 MiB sparse dumps, metadata beyond 64 MiB, marker/check-message
+boundaries, growth and replacement during capture, zero-size growth, truncation, descriptor
+cleanup and partial-header retry behavior. The largest requested parser read is 1 MiB +
+4,096 bytes, plus four retained 64 KiB metadata pages. A 1,042-module fixture requires no
+more than eight reads, preventing repeated reads between module and name pages.
 
-`results.json` records source hashes, exact counts, failed case names, process exit codes and
-non-timeout status. The runner refuses changed source hashes or unexpected results.
-
-## Reachability and memory scope
-
-Crashpad's macOS database prepares a `.dmp` in its `new` directory while writing, then renames
-it after completion. Orca recursively scans these directories. Crashpad's seekable writer
-keeps the signature invalid until the body is complete, then rewrites the header. The growth
-fixture follows that ordering: a small invalid-header file is statted, grows, then receives
-its completed header before capture reads it. These are upstream implementation facts, not an
-exact vendored-build or field-incident reproduction. See the primary
-[database implementation](https://chromium.googlesource.com/crashpad/crashpad/+/refs/heads/main/client/crash_report_database_mac.mm)
-and [minidump writer](https://chromium.googlesource.com/crashpad/crashpad/+/HEAD/minidump/minidump_file_writer.cc).
-Same-path replacement is a separate admitted filesystem race; natural UUID reuse is not claimed.
-
-This fixes a potentially large **transient allocation after a process crash**. The parser
-returns a bounded text signature and does not retain the whole dump. The bounded reader limits
-individual buffer capacity and returned content; old and expanded buffers may briefly coexist,
-and independent crash captures can overlap. This is not a claim of a 64 MiB aggregate RSS cap,
-a long-lived leak, or an explanation of #19831/#19768's reported memory growth.
-
-## Validation and applicability
+## Parser compatibility
 
 ```sh
-ORCA_BACKGROUND_LAUNCH=1 node node_modules/vitest/vitest.mjs run --config config/vitest.config.ts src/main/crash-reporting/crashpad-capture-read-limit.test.ts src/main/crash-reporting/crashpad-capture.test.ts src/main/crash-reporting/minidump-crash-signature.test.ts src/shared/node-bounded-file-reader.test.ts
-ORCA_BACKGROUND_LAUNCH=1 node node_modules/typescript/bin/tsc --noEmit -p config/tsconfig.node.json
+ORCA_BACKGROUND_LAUNCH=1 node docs/audits/crashpad-read-limit/stream-signature-parity.cjs
 ```
 
-The focused suites pass **51 tests across four files**, including the existing bounded-reader
-failure/descriptor-close controls. Node typecheck, focused lint and formatting pass.
+The separate parity script compares 47 fixtures with the published parser at
+`09dbe227547fadaec8d9163f35fd127b0dc1c3ed`, using both in-memory buffers and real file handles.
+It covers annotations, modules, exceptions, chunk boundaries and marker exhaustion. It
+also prints five warm timings for 8/64 MiB sparse dumps; these local synthetic timings
+are not a platform-wide performance guarantee. This older parity script does not enforce
+the source manifest; use the manifest-checking regression runner first.
 
-The caller before this patch is byte-identical on main
-`291b4ddd6f1c1af480169885e0fda7f9c78ff053`, and the reused bounded reader exists there. The exact
-production patch passes an alternate-index apply check against that base; no earlier audit
-fix is required.
+## Limits and user impact
 
-## Follow-up: preserve growing-dump diagnostics with bounded range reads
+This removes a potentially large transient allocation after a crash; it does not establish
+the cause of normal-session OOMs or an aggregate process-memory cap. Independent captures
+can overlap. No evidence ties this file-growth race to #19831 or #19768.
 
-The quota-only implementation above is superseded by a file-backed parser. The directory's existing 64 MiB candidate policy remains, but growth/replacement after that observation no longer rejects a dump merely because the opened file exceeds the quota. The same metadata parser now reads bounded ranges through four retained 64 KiB pages; the embedded-log parser scans once in 1 MiB windows with overlapping prefix/suffix bytes. It preserves severity ordering, the first 256 markers per severity, annotation precedence, module bounds, and full check messages. Nonempty files retain the opened extent; zero-size files observe through EOF as the previous native Buffer reader did. Every descriptor closes before capture resolves.
+The opened file supplies the parsed ranges. In-place rewrites are not an atomic snapshot.
+Nonempty files retain their opened extent. A file opened at size zero receives at least one
+read, then observes growth only until the capture deadline; later bytes may therefore be
+omitted from that diagnostic signature. This keeps a continuously growing report from
+holding capture open indefinitely. Dump files themselves are not truncated by this reader.
 
-The production tests cover an 80 MiB sparse dump, metadata RVAs beyond 64 MiB, markers/full 4,000-byte messages across seven block offsets, growth and replacement during capture, zero-size growth, truncation, and existing crashpad/parser behavior. The largest requested read is 1 MiB + 4,096 bytes, plus at most four 64 KiB metadata pages; dump-sized allocation is removed. The generic bounded-reader option introduced by the earlier follow-up is removed because capture no longer needs it.
-
-`stream-signature-parity.cjs` compares 47 fixtures against the exact prior published parser `09dbe227547fadaec8d9163f35fd127b0dc1c3ed`, both in memory and through real file handles. It reuses the checked-in minidump fixture builder and checks annotations, modules, exception attribution, chunk boundaries, severity and marker exhaustion. Its result file also records five warm measurements for 8/64 MiB sparse dumps; these are local synthetic timings, not a platform-wide performance guarantee. Run from the checkout with `ORCA_BACKGROUND_LAUNCH=1 node docs/audits/crashpad-read-limit/stream-signature-parity.cjs`.
-
-This removes the newly introduced diagnostic-loss case without claiming an atomic snapshot against in-place rewrites. Source size remains the observed extent, not the number of sparse metadata bytes actually fetched. Crash dumps already over 64 MiB at directory discovery retain the pre-existing exclusion. No evidence ties this race to the reported user OOM incidents.
-
-The metadata cache retains four aligned pages so walking a module table and its distant names does not alternate disk reads per module. A 1,042-module fixture required 2,089 reads with the first single-page implementation; the four-page cache passes an eight-read upper bound with identical faulting-module attribution. The old cache fails that regression control.
+Crashpad normally writes an invalid header first and promotes a completed file later:
+[database implementation](https://chromium.googlesource.com/crashpad/crashpad/+/refs/heads/main/client/crash_report_database_mac.mm)
+and [minidump writer](https://chromium.googlesource.com/crashpad/crashpad/+/HEAD/minidump/minidump_file_writer.cc).
+The fixtures represent that ordering; they do not reproduce a field incident or a native
+Crashpad process. All checks run in background Node processes without app windows.

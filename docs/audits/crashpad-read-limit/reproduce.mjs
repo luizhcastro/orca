@@ -3,8 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { applyPatch, parsePatch, reversePatch } from 'diff'
+import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 if (process.env.ORCA_BACKGROUND_LAUNCH !== '1') {
@@ -12,44 +11,18 @@ if (process.env.ORCA_BACKGROUND_LAUNCH !== '1') {
 }
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
-const patch = await readFile(new URL('./fix.patch', import.meta.url), 'utf8')
-const expectedSourceHashes = {
-  before: 'f0326e6be534a321adc765bc0bf95ef72debe5ac701861c82e96b87ec822f022',
-  after: '3d6ec639f4849944dc73f7c9d73c243bc34375ce8e2ba1584d6350e91763edbd'
-}
-const beforeSources = {}
+const expectedHashes = JSON.parse(
+  await readFile(new URL('./source-hashes.json', import.meta.url), 'utf8')
+)
 const sourceHashes = {}
-for (const parsed of parsePatch(patch)) {
-  const path = parsed.newFileName.replace(/^b\//, '')
-  const absolute = resolve(root, path)
-  const current = await readFile(absolute, 'utf8')
-  const before = applyPatch(current, reversePatch(parsed))
-  if (before === false) {
-    throw new Error(`Source changed; review the proof patch: ${path}`)
-  }
-  beforeSources[absolute.replaceAll('\\', '/')] = before
-  sourceHashes[path] = {
-    before: createHash('sha256').update(before).digest('hex'),
-    after: createHash('sha256').update(current).digest('hex')
-  }
-  if (
-    sourceHashes[path].before !== expectedSourceHashes.before ||
-    sourceHashes[path].after !== expectedSourceHashes.after
-  ) {
+for (const [path, expected] of Object.entries(expectedHashes)) {
+  const actual = createHash('sha256')
+    .update(await readFile(resolve(root, path)))
+    .digest('hex')
+  if (actual !== expected) {
     throw new Error(`Source hash changed; review this evidence: ${path}`)
   }
-}
-
-for (const path of [
-  'src/main/crash-reporting/crashpad-capture-read-limit.test.ts',
-  'src/main/crash-reporting/minidump-crash-signature.ts',
-  'src/shared/node-bounded-file-reader.ts'
-]) {
-  sourceHashes[path] = {
-    current: createHash('sha256')
-      .update(await readFile(resolve(root, path)))
-      .digest('hex')
-  }
+  sourceHashes[path] = actual
 }
 
 const scratch = await mkdtemp(join(tmpdir(), 'orca-crashpad-read-limit-'))
@@ -68,29 +41,41 @@ try {
   })
   runnerModuleId = require.resolve(runnerPath)
   const { runProcess } = require(runnerModuleId)
-  const baselineConfig = join(scratch, 'before.config.mjs')
-  const fixedConfig = join(scratch, 'after.config.mjs')
-  const includes = ['src/main/crash-reporting/crashpad-capture-read-limit.test.ts']
-  const configImport = JSON.stringify(pathToFileURL(resolve(root, 'config/vitest.config.ts')).href)
-  await writeFile(
-    baselineConfig,
-    `import base from ${configImport};
-const beforeSources = ${JSON.stringify(beforeSources)};
-export default {...base, test: {...base.test, include: ${JSON.stringify(includes)}, testNamePattern: /^(?!bounds same-open growth)/}, plugins: [{
-  name: 'crashpad-read-limit-before-fix', enforce: 'pre',
-  transform(_code, id) {
-    const before = beforeSources[id.replaceAll('\\\\', '/').split('?')[0]];
-    return before === undefined ? null : {code: before, map: null};
+  const includes = [
+    'src/main/crash-reporting/crashpad-capture-read-limit.test.ts',
+    'src/main/crash-reporting/minidump-file-source.test.ts'
+  ]
+  const deadlinePath = resolve(root, 'src/main/crash-reporting/minidump-file-source.ts')
+  const current = await readFile(deadlinePath, 'utf8')
+  const deadlineCondition =
+    'size > 0 && options.deadlineMs !== undefined && now() >= options.deadlineMs'
+  if (current.split(deadlineCondition).length !== 2) {
+    throw new Error('Deadline mutation no longer identifies exactly one branch.')
   }
-}]};\n`
-  )
-
+  const withoutDeadline = current.replace(deadlineCondition, 'false')
+  const deadlineConfig = join(scratch, 'without-deadline.config.mjs')
+  const fixedConfig = join(scratch, 'fixed.config.mjs')
+  const config = {
+    test: {
+      environment: 'node',
+      include: includes,
+      testTimeout: 30_000,
+      execArgv: ['--no-experimental-webstorage']
+    }
+  }
   await writeFile(
-    fixedConfig,
-    `import base from ${configImport};\nexport default {...base, test: {...base.test, include: ${JSON.stringify(includes)}}};\n`
+    deadlineConfig,
+    `export default {...${JSON.stringify(config)}, plugins: [{
+      name: 'disable-extent-deadline', enforce: 'pre',
+      transform(_code, id) {
+        return id.split('?')[0].replaceAll('\\\\', '/') === ${JSON.stringify(deadlinePath.replaceAll('\\', '/'))}
+          ? {code: ${JSON.stringify(withoutDeadline)}, map: null} : null;
+      }
+    }]};\n`
   )
+  await writeFile(fixedConfig, `export default ${JSON.stringify(config)};\n`)
 
-  async function run(label, config) {
+  async function run(label, configPath) {
     const report = join(scratch, `${label}.json`)
     const result = await runProcess({
       program: process.execPath,
@@ -98,7 +83,7 @@ export default {...base, test: {...base.test, include: ${JSON.stringify(includes
         resolve(root, 'node_modules/vitest/vitest.mjs'),
         'run',
         '--config',
-        config,
+        configPath,
         '--reporter=json',
         `--outputFile=${report}`
       ],
@@ -127,25 +112,29 @@ export default {...base, test: {...base.test, include: ${JSON.stringify(includes
     }
   }
 
-  const before = await run('before', baselineConfig)
-  const after = await run('after', fixedConfig)
+  const withoutDeadlineResult = await run('without-deadline', deadlineConfig)
+  const fixed = await run('fixed', fixedConfig)
+  const expectedFailures = [1, 2].map(
+    (pages) => `stops observing a growing size-zero dump after the deadline at page ${pages}`
+  )
   const passed =
-    before.exitCode === 1 &&
-    !before.timedOut &&
-    before.failed === 3 &&
-    before.passed === 4 &&
-    before.skipped === 1 &&
-    after.exitCode === 0 &&
-    !after.timedOut &&
-    after.passed === 8 &&
-    after.failed === 0 &&
-    after.skipped === 0
+    withoutDeadlineResult.exitCode === 1 &&
+    !withoutDeadlineResult.timedOut &&
+    withoutDeadlineResult.failed === 2 &&
+    withoutDeadlineResult.passed === 21 &&
+    withoutDeadlineResult.skipped === 0 &&
+    JSON.stringify(withoutDeadlineResult.failedCases) === JSON.stringify(expectedFailures) &&
+    fixed.exitCode === 0 &&
+    !fixed.timedOut &&
+    fixed.passed === 23 &&
+    fixed.failed === 0 &&
+    fixed.skipped === 0
   const result = {
     comparison:
-      'Actual crashpad capture and parser with temporary synthetic files; before reverses only fix.patch in memory; descriptor-growth control is fixed-only',
+      'Current capture and file-source regressions; negative control removes only the extent deadline in memory.',
     sourceHashes,
-    before,
-    after,
+    withoutDeadline: withoutDeadlineResult,
+    fixed,
     passed
   }
   await writeFile(

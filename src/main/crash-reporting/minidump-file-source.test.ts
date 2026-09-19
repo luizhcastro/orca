@@ -2,7 +2,7 @@ import { mkdtemp, open, rm, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createMinidumpFileSource } from './minidump-file-source'
+import { createMinidumpFileSource, observeMinidumpExtent } from './minidump-file-source'
 import { parseMinidumpCrashSignature } from './minidump-crash-signature'
 
 const roots: string[] = []
@@ -28,6 +28,29 @@ async function sourceFile() {
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
+
+it.each([1, 2])(
+  'stops observing a growing size-zero dump after the deadline at page %i',
+  async (pages) => {
+    const path = await sourceFile()
+    const handle = await open(path, 'r+')
+    const pageBytes = 64 * 1024
+    try {
+      await handle.truncate(3 * pageBytes)
+      const read = vi.spyOn(handle, 'read')
+      let observations = 0
+      const now = () => (++observations >= pages ? 10 : 0)
+
+      expect(await observeMinidumpExtent(handle, 0, { deadlineMs: 10, now })).toBe(
+        pages * pageBytes
+      )
+      expect(read).toHaveBeenCalledTimes(pages)
+      expect(observations).toBe(pages)
+    } finally {
+      await handle.close()
+    }
+  }
+)
 
 it.each([-96, -40, -1, 0, 1, 40, 96])(
   'preserves marker and full text at block boundary %+d',
