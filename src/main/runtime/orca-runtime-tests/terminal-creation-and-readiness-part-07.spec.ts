@@ -596,7 +596,11 @@ describe('OrcaRuntimeService', () => {
         spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
         write: (_ptyId, data) => {
           writes.push(data)
-          acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
+          if (agent === 'omp' && data.endsWith('\r')) {
+            runtime.onPtyData('pty-bg', '\x1b]0;Codex working\x07', Date.now())
+          } else {
+            acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
+          }
           return true
         },
         kill: () => true,
