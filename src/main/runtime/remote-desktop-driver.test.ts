@@ -369,7 +369,11 @@ describe('remote desktop viewer width driver', () => {
     void runtime.claimRemoteDesktopViewer('pty-1', 'sub-B')
 
     expect(
-      layoutQueues.get('pty-1')?.pending.map(({ target }) => target.ownerSubscriptionKey)
+      layoutQueues
+        .get('pty-1')
+        ?.pending.map(({ target }) =>
+          target.kind === 'remote-desktop' ? target.ownerSubscriptionKey : null
+        )
     ).toEqual(['sub-A', 'sub-B'])
     layoutQueues.delete('pty-1')
   })
