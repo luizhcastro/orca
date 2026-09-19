@@ -23,9 +23,12 @@ function pathnameOf(href: string): string {
  * bundle on every tap, so the shell pushes the native screen over the still-mounted view instead
  * and Back reveals the page with nothing reloaded.
  *
- * The three members that leave this document are wrapped and the rest are the router's own: the
- * shell says which routes are the page's, in `init`, and the same answer drives all three. A
- * handoff the shell cannot honour — an older shell that granted no `navigate`, or a target the
+ * The four members that can leave this document are wrapped and the rest are the router's own. The
+ * three that carry a target are decided by one answer: the shell says which routes are the page's,
+ * in `init`. `back` carries none and is decided by the document's own stack instead, because there
+ * is no target to match — what it leaves for is whatever the shell pushed this page onto.
+ *
+ * A handoff the shell cannot honour — an older shell that granted no `navigate`, or a target the
  * protocol refuses — falls through to the local router: Unmatched is a worse screen than the one
  * the page is on, but a tap that does nothing at all is worse than both, and the route policy is
  * what keeps that case off a device.
