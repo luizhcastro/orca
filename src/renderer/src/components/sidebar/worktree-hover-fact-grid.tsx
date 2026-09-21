@@ -210,11 +210,20 @@ export function WorktreeHoverFactGrid({
     )
   }
   if (facts.childWorkspaceCount > 0) {
-    const childLabel = translate(
-      'auto.components.sidebar.worktreeHoverCard.childWorkspaces',
-      '{{count}} child workspaces',
-      { count: facts.childWorkspaceCount }
-    )
+    // Why the explicit key: the localization gate wants every key it can see, so the
+    // plural form is chosen here rather than left to i18next's suffix lookup.
+    const childLabel =
+      facts.childWorkspaceCount === 1
+        ? translate(
+            'auto.components.sidebar.worktreeHoverCard.childWorkspaces_one',
+            '{{count}} child workspace',
+            { count: facts.childWorkspaceCount }
+          )
+        : translate(
+            'auto.components.sidebar.worktreeHoverCard.childWorkspaces_other',
+            '{{count}} child workspaces',
+            { count: facts.childWorkspaceCount }
+          )
     cells.push(
       <HoverFactCell
         key="children"

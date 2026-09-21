@@ -56,7 +56,12 @@ export function getWorktreeHoverContextTitle(
   const taken = new Set(
     [facts.title, ...alreadyShown].map((value) => value?.trim()).filter(Boolean)
   )
-  const candidates = [facts.review?.title, facts.linearIssue?.title, facts.issue?.title]
+  const candidates = [
+    facts.review?.title,
+    facts.linearIssue?.title,
+    facts.issue?.title,
+    facts.jiraIssue?.title
+  ]
   for (const candidate of candidates) {
     const trimmed = candidate?.trim()
     if (trimmed && !taken.has(trimmed)) {

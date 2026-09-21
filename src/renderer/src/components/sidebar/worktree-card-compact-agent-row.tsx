@@ -277,6 +277,7 @@ export const CompactAgentRow = React.memo(function CompactAgentRow({
         <Tooltip>
           <TooltipTrigger asChild>
             <span
+              role="img"
               className={cn(
                 'inline-flex shrink-0 items-center',
                 isFocusedPane ? 'text-foreground/70' : 'text-muted-foreground/70'

@@ -8,6 +8,11 @@ import { useCallback, useSyncExternalStore } from 'react'
  * explicit subscriptions — one notification per pane whose answer changed, so a
  * sidebar row re-renders only when its own pane flips.
  *
+ * Tracked per producer, because one pane key can have two composers behind it: a
+ * bridge pane overlays the native chat on the agent's TUI and both write here. A
+ * single boolean let the terminal probe clear a native draft that was still
+ * waiting, so the row reads the union instead.
+ *
  * Cost control: nothing is read on a keystroke. A producer asks for a check, the
  * check coalesces into one trailing pass per pane, and the pane's probe (which
  * owns the expensive part, reading a terminal buffer) runs at most once per pass.
@@ -16,12 +21,15 @@ import { useCallback, useSyncExternalStore } from 'react'
 /** Whether the pane's composer holds unsent text, or null when it cannot say. */
 export type AgentUnsentDraftProbe = () => boolean | null
 
+/** Which composer answered. A pane can have one of each at the same time. */
+export type AgentUnsentDraftSource = 'native-chat' | 'terminal'
+
 export const AGENT_UNSENT_DRAFT_CHECK_DELAY_MS = 500
 /** Sending produces no further input, so one late look retires a stale marker. */
 export const AGENT_UNSENT_DRAFT_CONFIRM_DELAY_MS = 2_000
 
 const probes = new Map<string, AgentUnsentDraftProbe>()
-const panesWithUnsentDraft = new Set<string>()
+const sourcesByPaneKey = new Map<string, Set<AgentUnsentDraftSource>>()
 const listenersByPaneKey = new Map<string, Set<() => void>>()
 const pendingChecks = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -36,22 +44,41 @@ function notify(paneKey: string): void {
 }
 
 export function hasAgentUnsentDraft(paneKey: string): boolean {
-  return panesWithUnsentDraft.has(paneKey)
+  // Why: only panes with at least one waiting composer keep an entry, so a
+  // cleared pane leaves nothing behind and a closed one cannot accumulate.
+  return sourcesByPaneKey.has(paneKey)
 }
 
-/** Records the answer, notifying only when it actually changed. */
-export function setAgentUnsentDraft(paneKey: string, unsent: boolean): void {
-  if (unsent === panesWithUnsentDraft.has(paneKey)) {
-    return
-  }
+/**
+ * Records one producer's answer. The pane's answer is the union, so a composer
+ * clearing its own draft cannot speak for the other one, and a listener hears
+ * only when that union changes.
+ */
+export function setAgentUnsentDraft(
+  paneKey: string,
+  source: AgentUnsentDraftSource,
+  unsent: boolean
+): void {
+  const sources = sourcesByPaneKey.get(paneKey)
+  const had = sources !== undefined
   if (unsent) {
-    panesWithUnsentDraft.add(paneKey)
+    if (sources) {
+      sources.add(source)
+    } else {
+      sourcesByPaneKey.set(paneKey, new Set([source]))
+    }
   } else {
-    // Why: only panes that hold a draft are worth an entry, so a cleared pane
-    // leaves nothing behind and a closed one cannot accumulate.
-    panesWithUnsentDraft.delete(paneKey)
+    if (!sources) {
+      return
+    }
+    sources.delete(source)
+    if (sources.size === 0) {
+      sourcesByPaneKey.delete(paneKey)
+    }
   }
-  notify(paneKey)
+  if (had !== sourcesByPaneKey.has(paneKey)) {
+    notify(paneKey)
+  }
 }
 
 /**
@@ -99,7 +126,7 @@ function runCheck(paneKey: string, isConfirmation: boolean): void {
   if (answer === null) {
     return
   }
-  setAgentUnsentDraft(paneKey, answer)
+  setAgentUnsentDraft(paneKey, 'terminal', answer)
   if (answer && !isConfirmation) {
     schedule(paneKey, AGENT_UNSENT_DRAFT_CONFIRM_DELAY_MS, true)
   }
@@ -151,6 +178,6 @@ export function resetAgentUnsentDraftsForTests(): void {
   }
   pendingChecks.clear()
   probes.clear()
-  panesWithUnsentDraft.clear()
+  sourcesByPaneKey.clear()
   listenersByPaneKey.clear()
 }

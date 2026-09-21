@@ -5652,7 +5652,8 @@
         },
         "worktreeHoverCard": {
           "asleep": "Sleeping",
-          "childWorkspaces": "{{count}} child workspaces",
+          "childWorkspaces_one": "{{count}} child workspace",
+          "childWorkspaces_other": "{{count}} child workspaces",
           "issue": "Issue #{{number}}",
           "lastActivity": "Last activity {{ago}} ago",
           "moreSubagents": "+{{count}} more",

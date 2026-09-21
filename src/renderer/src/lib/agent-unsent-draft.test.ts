@@ -20,12 +20,12 @@ describe('agent unsent draft registry', () => {
     const listener = vi.fn()
     subscribeAgentUnsentDraft('tab-1:leaf-1', listener)
 
-    setAgentUnsentDraft('tab-1:leaf-1', true)
-    setAgentUnsentDraft('tab-1:leaf-1', true)
+    setAgentUnsentDraft('tab-1:leaf-1', 'terminal', true)
+    setAgentUnsentDraft('tab-1:leaf-1', 'terminal', true)
     expect(listener).toHaveBeenCalledTimes(1)
     expect(hasAgentUnsentDraft('tab-1:leaf-1')).toBe(true)
 
-    setAgentUnsentDraft('tab-1:leaf-1', false)
+    setAgentUnsentDraft('tab-1:leaf-1', 'terminal', false)
     expect(listener).toHaveBeenCalledTimes(2)
     expect(hasAgentUnsentDraft('tab-1:leaf-1')).toBe(false)
   })
@@ -34,9 +34,39 @@ describe('agent unsent draft registry', () => {
     const listener = vi.fn()
     subscribeAgentUnsentDraft('tab-1:leaf-1', listener)
 
-    setAgentUnsentDraft('tab-2:leaf-9', true)
+    setAgentUnsentDraft('tab-2:leaf-9', 'terminal', true)
 
     expect(listener).not.toHaveBeenCalled()
+    expect(hasAgentUnsentDraft('tab-1:leaf-1')).toBe(false)
+  })
+
+  it('keeps one composer from clearing the other behind the same pane key', () => {
+    const listener = vi.fn()
+    subscribeAgentUnsentDraft('tab-1:leaf-1', listener)
+
+    // A bridge pane overlays the native chat on the agent's TUI, both under this key.
+    setAgentUnsentDraft('tab-1:leaf-1', 'native-chat', true)
+    expect(hasAgentUnsentDraft('tab-1:leaf-1')).toBe(true)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    // Typing in the TUI reports an empty composer; the native draft still waits.
+    setAgentUnsentDraft('tab-1:leaf-1', 'terminal', false)
+    expect(hasAgentUnsentDraft('tab-1:leaf-1')).toBe(true)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    setAgentUnsentDraft('tab-1:leaf-1', 'native-chat', false)
+    expect(hasAgentUnsentDraft('tab-1:leaf-1')).toBe(false)
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('needs both composers to clear before the pane reads clean', () => {
+    setAgentUnsentDraft('tab-1:leaf-1', 'native-chat', true)
+    setAgentUnsentDraft('tab-1:leaf-1', 'terminal', true)
+
+    setAgentUnsentDraft('tab-1:leaf-1', 'terminal', false)
+    expect(hasAgentUnsentDraft('tab-1:leaf-1')).toBe(true)
+
+    setAgentUnsentDraft('tab-1:leaf-1', 'native-chat', false)
     expect(hasAgentUnsentDraft('tab-1:leaf-1')).toBe(false)
   })
 

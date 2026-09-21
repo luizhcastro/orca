@@ -71,6 +71,22 @@ describe('readTerminalComposerDraftPresence', () => {
     expect(readTerminalComposerDraftPresence(terminal)).toBe(false)
   })
 
+  it('says nothing when the screen has no cursor line to read', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    expect(
+      readTerminalComposerDraftPresence({
+        element: container,
+        rows: 12,
+        modes: { showCursor: true },
+        buffer: {
+          active: { baseY: 0, cursorX: 0, cursorY: 0, viewportY: 0, getLine: () => undefined }
+        }
+      })
+    ).toBeNull()
+  })
+
   it('says nothing for a pane that is not on screen', () => {
     const terminal = new Terminal({ cols: 80, rows: 12 })
     openTerminals.push(terminal)
